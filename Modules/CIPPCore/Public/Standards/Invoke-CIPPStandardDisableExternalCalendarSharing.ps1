@@ -1,36 +1,70 @@
 function Invoke-CIPPStandardDisableExternalCalendarSharing {
     <#
     .FUNCTIONALITY
-    Internal
+        Internal
+    .COMPONENT
+        (APIName) DisableExternalCalendarSharing
+    .SYNOPSIS
+        (Label) Disable external calendar sharing
+    .DESCRIPTION
+        (Helptext) Disables the ability for users to share their calendar with external users. Only for the default policy, so exclusions can be made if needed.
+        (DocsDescription) Disables external calendar sharing for the entire tenant. This is not a widely used feature, and it's therefore unlikely that this will impact users. Only for the default policy, so exclusions can be made if needed by making a new policy and assigning it to users.
+    .NOTES
+        CAT
+            Exchange Standards
+        TAG
+            "CIS"
+            "exo_individualsharing"
+        ADDEDCOMPONENT
+        IMPACT
+            Low Impact
+        ADDEDDATE
+            2024-01-08
+        POWERSHELLEQUIVALENT
+            Get-SharingPolicy \| Set-SharingPolicy -Enabled \$False
+        RECOMMENDEDBY
+            "CIS"
+        UPDATECOMMENTBLOCK
+            Run the Tools\Update-StandardsComments.ps1 script to update this comment block
+    .LINK
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/exchange-standards#low-impact
     #>
+
     param($Tenant, $Settings)
-    
-    if ($Settings.remediate) {
-        New-ExoRequest -tenantid $Tenant -cmdlet 'Get-SharingPolicy' | Where-Object { $_.Default -eq $true } | ForEach-Object {
-            try {
-                New-ExoRequest -tenantid $Tenant -cmdlet 'Set-SharingPolicy' -cmdParams @{ Identity = $_.Id ; Enabled = $false } -UseSystemMailbox $true
-                Write-LogMessage -API 'Standards' -tenant $tenant -message "Successfully disabled external calendar sharing for the policy $($_.Name)" -sev Info
-            } catch {
-                Write-LogMessage -API 'Standards' -tenant $tenant -message "Failed to disable external calendar sharing for the policy $($_.Name). Error: $($_.exception.message)" -sev Error
+    ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'DisableExternalCalendarSharing'
+
+    $CurrentInfo = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-SharingPolicy' | Where-Object { $_.Default -eq $true }
+
+    if ($Settings.remediate -eq $true) {
+        if ($CurrentInfo.Enabled) {
+            $CurrentInfo | ForEach-Object {
+                try {
+                    New-ExoRequest -tenantid $Tenant -cmdlet 'Set-SharingPolicy' -cmdParams @{ Identity = $_.Id ; Enabled = $false } -UseSystemMailbox $true
+                    Write-LogMessage -API 'Standards' -tenant $tenant -message "Successfully disabled external calendar sharing for the policy $($_.Name)" -sev Info
+                } catch {
+                    $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
+                    Write-LogMessage -API 'Standards' -tenant $tenant -message "Failed to disable external calendar sharing for the policy $($_.Name). Error: $ErrorMessage" -sev Error
+                }
             }
+        } else {
+            Write-LogMessage -API 'Standards' -tenant $tenant -message 'External calendar sharing is already disabled' -sev Info
+
+        }
+
+    }
+
+    if ($Settings.alert -eq $true) {
+        if ($CurrentInfo.Enabled) {
+            Write-StandardsAlert -message 'External calendar sharing is enabled' -object ($CurrentInfo | Select-Object enabled) -tenant $tenant -standardName 'DisableExternalCalendarSharing' -standardId $Settings.standardId
+            Write-LogMessage -API 'Standards' -tenant $tenant -message 'External calendar sharing is enabled' -sev Info
+        } else {
+            Write-LogMessage -API 'Standards' -tenant $tenant -message 'External calendar sharing is not enabled' -sev Info
         }
     }
 
-    # This is ugly but done to avoid a second call to the Graph API
-    if ($Settings.alert -or $Settings.report) {
-        $CurrentInfo = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-SharingPolicy' | Where-Object { $_.Default -eq $true }
-
-        if ($Settings.alert) {
-            if ($CurrentInfo.Enabled) {
-                Write-LogMessage -API 'Standards' -tenant $tenant -message 'External calendar sharing is enabled' -sev Alert
-            } else {
-                Write-LogMessage -API 'Standards' -tenant $tenant -message 'External calendar sharing is not enabled' -sev Info
-            }
-        }
-        if ($Settings.report) {
-            Add-CIPPBPAField -FieldName 'ExternalCalendarSharingDisabled' -FieldValue [bool]$CurrentInfo.Enabled -StoreAs bool -Tenant $tenant
-        }
+    if ($Settings.report -eq $true) {
+        $CurrentInfo.Enabled = -not $CurrentInfo.Enabled
+        Set-CIPPStandardsCompareField -FieldName 'standards.DisableExternalCalendarSharing' -FieldValue $CurrentInfo.Enabled -TenantFilter $Tenant
+        Add-CIPPBPAField -FieldName 'ExternalCalendarSharingDisabled' -FieldValue $CurrentInfo.Enabled -StoreAs bool -Tenant $tenant
     }
-
-
 }
